@@ -55,77 +55,78 @@
 #endif
 
 /*
- * In this file we're using unsigned long to represent physical pointers as
- * they are received in a single register when OP-TEE is initially entered.
- * This limits 32-bit systems to only use make use of the lower 32 bits
- * of a physical address for initial parameters.
+ * 在这个文件中，我们使用unsigned long来表示物理指针，
+ * 因为OP-TEE初始进入时它们是在单个寄存器中接收的。
+ * 这限制了32位系统只能使用物理地址的低32位作为初始参数。
  *
- * 64-bit systems on the other hand can use full 64-bit physical pointers.
+ * 64位系统则可以使用完整的64位物理指针。
  */
-#define PADDR_INVALID		ULONG_MAX
+#define PADDR_INVALID ULONG_MAX
 
 #if defined(CFG_BOOT_SECONDARY_REQUEST)
+// 非安全世界入口上下文结构体
 struct ns_entry_context {
-	uintptr_t entry_point;
-	uintptr_t context_id;
+	uintptr_t entry_point; // 入口点地址
+	uintptr_t context_id; // 上下文ID
 };
+// 所有核心的非安全世界入口上下文数组
 struct ns_entry_context ns_entry_contexts[CFG_TEE_CORE_NB_CORE];
+// 自旋表，用于核心启动同步
 static uint32_t spin_table[CFG_TEE_CORE_NB_CORE];
 #endif
 
 #ifdef CFG_BOOT_SYNC_CPU
 /*
- * Array used when booting, to synchronize cpu.
- * When 0, the cpu has not started.
- * When 1, it has started
+ * 启动时使用的数组，用于CPU同步。
+ * 当值为0时，表示CPU尚未启动。
+ * 当值为1时，表示CPU已启动。
  */
 uint32_t sem_cpu_sync[CFG_TEE_CORE_NB_CORE];
 DECLARE_KEEP_PAGER(sem_cpu_sync);
 #endif
 
 /*
- * Must not be in .bss since it's initialized and used from assembly before
- * .bss is cleared.
+ * 必须放在.bss段之外，因为它在.bss清零之前就从汇编代码中初始化和使用。
  */
 vaddr_t boot_cached_mem_end __nex_data = 1;
 
-static unsigned long boot_arg_fdt __nex_bss;
-unsigned long boot_arg_nsec_entry __nex_bss;
-static unsigned long boot_arg_pageable_part __nex_bss;
-static unsigned long boot_arg_transfer_list __nex_bss;
-static struct transfer_list_header *mapped_tl __nex_bss;
+// 启动参数变量
+static unsigned long boot_arg_fdt __nex_bss; // 设备树地址
+unsigned long boot_arg_nsec_entry __nex_bss; // 非安全世界入口地址
+static unsigned long boot_arg_pageable_part __nex_bss; // 可分页部分地址
+static unsigned long boot_arg_transfer_list __nex_bss; // 传输列表地址
+static struct transfer_list_header *mapped_tl __nex_bss; // 映射的传输列表指针
 
 #ifdef CFG_SECONDARY_INIT_CNTFRQ
-static uint32_t cntfrq;
+static uint32_t cntfrq; // 计数器频率值
 #endif
 
-/* May be overridden in plat-$(PLATFORM)/main.c */
+/* 可能在plat-$(PLATFORM)/main.c中被重写 */
 __weak void plat_primary_init_early(void)
 {
 }
 DECLARE_KEEP_PAGER(plat_primary_init_early);
 
-/* May be overridden in plat-$(PLATFORM)/main.c */
+/* 可能在plat-$(PLATFORM)/main.c中被重写 */
 __weak void boot_primary_init_intc(void)
 {
 }
 
-/* May be overridden in plat-$(PLATFORM)/main.c */
+/* 可能在plat-$(PLATFORM)/main.c中被重写 */
 __weak void boot_secondary_init_intc(void)
 {
 }
 
-/* May be overridden in plat-$(PLATFORM)/main.c */
+/* 可能在plat-$(PLATFORM)/main.c中被重写 */
 __weak unsigned long plat_get_aslr_seed(void)
 {
-	DMSG("Warning: no ASLR seed");
+	DMSG("警告: 没有ASLR种子");
 
 	return 0;
 }
 
 /*
- * This function is called as a guard after each smc call which is not
- * supposed to return.
+ * 此函数在每次不应该返回的smc调用后被调用作为保护。
  */
 void __panic_at_smc_return(void)
 {
@@ -136,17 +137,17 @@ void __panic_at_smc_return(void)
 void init_sec_mon(unsigned long nsec_entry __maybe_unused)
 {
 	assert(nsec_entry == PADDR_INVALID);
-	/* Do nothing as we don't have a secure monitor */
+	/* 不执行任何操作，因为我们没有安全监视器 */
 }
 #else
-/* May be overridden in plat-$(PLATFORM)/main.c */
+/* 可能在plat-$(PLATFORM)/main.c中被重写 */
 __weak void init_sec_mon(unsigned long nsec_entry)
 {
 	struct sm_nsec_ctx *nsec_ctx;
 
 	assert(nsec_entry != PADDR_INVALID);
 
-	/* Initialize secure monitor */
+	/* 初始化安全监视器 */
 	nsec_ctx = sm_get_nsec_ctx();
 	nsec_ctx->mon_lr = nsec_entry;
 	nsec_ctx->mon_spsr = CPSR_MODE_SVC | CPSR_I;
@@ -162,62 +163,61 @@ static void init_vfp_nsec(void)
 #else
 static void init_vfp_nsec(void)
 {
-	/* Normal world can use CP10 and CP11 (SIMD/VFP) */
+	/* 非安全世界可以使用CP10和CP11(SIMD/VFP) */
 	write_nsacr(read_nsacr() | NSACR_CP10 | NSACR_CP11);
 }
 #endif
 
+// 检查加密扩展支持
 static void check_crypto_extensions(void)
 {
 	bool ce_supported = true;
 
-	if (!feat_aes_implemented() &&
-	    IS_ENABLED(CFG_CRYPTO_AES_ARM_CE)) {
-		EMSG("AES instructions are not supported");
+	if (!feat_aes_implemented() && IS_ENABLED(CFG_CRYPTO_AES_ARM_CE)) {
+		EMSG("不支持AES指令");
 		ce_supported = false;
 	}
 
-	if (!feat_sha1_implemented() &&
-	    IS_ENABLED(CFG_CRYPTO_SHA1_ARM_CE)) {
-		EMSG("SHA1 instructions are not supported");
+	if (!feat_sha1_implemented() && IS_ENABLED(CFG_CRYPTO_SHA1_ARM_CE)) {
+		EMSG("不支持SHA1指令");
 		ce_supported = false;
 	}
 
 	if (!feat_sha256_implemented() &&
 	    IS_ENABLED(CFG_CRYPTO_SHA256_ARM_CE)) {
-		EMSG("SHA256 instructions are not supported");
+		EMSG("不支持SHA256指令");
 		ce_supported = false;
 	}
 
-	/* Check aarch64 specific instructions */
+	/* 检查aarch64特定指令 */
 	if (IS_ENABLED(CFG_ARM64_core)) {
 		if (!feat_sha512_implemented() &&
 		    IS_ENABLED(CFG_CRYPTO_SHA512_ARM_CE)) {
-			EMSG("SHA512 instructions are not supported");
+			EMSG("不支持SHA512指令");
 			ce_supported = false;
 		}
 
 		if (!feat_sha3_implemented() &&
 		    IS_ENABLED(CFG_CRYPTO_SHA3_ARM_CE)) {
-			EMSG("SHA3 instructions are not supported");
+			EMSG("不支持SHA3指令");
 			ce_supported = false;
 		}
 
 		if (!feat_sm3_implemented() &&
 		    IS_ENABLED(CFG_CRYPTO_SM3_ARM_CE)) {
-			EMSG("SM3 instructions are not supported");
+			EMSG("不支持SM3指令");
 			ce_supported = false;
 		}
 
 		if (!feat_sm4_implemented() &&
 		    IS_ENABLED(CFG_CRYPTO_SM4_ARM_CE)) {
-			EMSG("SM4 instructions are not supported");
+			EMSG("不支持SM4指令");
 			ce_supported = false;
 		}
 	}
 
 	if (!ce_supported)
-		panic("HW doesn't support CE instructions");
+		panic("硬件不支持CE指令");
 }
 
 #if defined(CFG_WITH_VFP)
@@ -228,14 +228,12 @@ static void init_vfp_sec(void)
 	uint32_t cpacr = read_cpacr();
 
 	/*
-	 * Enable Advanced SIMD functionality.
-	 * Enable use of D16-D31 of the Floating-point Extension register
-	 * file.
+	 * 启用高级SIMD功能。
+	 * 启用浮点扩展寄存器文件的D16-D31使用。
 	 */
 	cpacr &= ~(CPACR_ASEDIS | CPACR_D32DIS);
 	/*
-	 * Enable usage of CP10 and CP11 (SIMD/VFP) (both kernel and user
-	 * mode.
+	 * 启用CP10和CP11(SIMD/VFP)的使用(内核和用户模式)。
 	 */
 	cpacr |= CPACR_CP(10, CPACR_CP_ACCESS_FULL);
 	cpacr |= CPACR_CP(11, CPACR_CP_ACCESS_FULL);
@@ -246,7 +244,7 @@ static void init_vfp_sec(void)
 #ifdef ARM64
 static void init_vfp_sec(void)
 {
-	/* Not using VFP until thread_kernel_enable_vfp() */
+	/* 暂时不使用VFP，直到thread_kernel_enable_vfp() */
 	vfp_disable();
 }
 #endif /* ARM64 */
@@ -255,7 +253,7 @@ static void init_vfp_sec(void)
 
 static void init_vfp_sec(void)
 {
-	/* Not using VFP */
+	/* 不使用VFP */
 }
 #endif
 
@@ -265,8 +263,7 @@ static void primary_save_cntfrq(void)
 	assert(cntfrq == 0);
 
 	/*
-	 * CNTFRQ should be initialized on the primary CPU by a
-	 * previous boot stage
+	 * CNTFRQ应该在主CPU上由之前的启动阶段初始化
 	 */
 	cntfrq = read_cntfrq();
 }
@@ -297,35 +294,29 @@ static void init_run_constructors(void)
 
 static void init_asan(void)
 {
-
 	/*
-	 * CFG_ASAN_SHADOW_OFFSET is also supplied as
-	 * -fasan-shadow-offset=$(CFG_ASAN_SHADOW_OFFSET) to the compiler.
-	 * Since all the needed values to calculate the value of
-	 * CFG_ASAN_SHADOW_OFFSET isn't available in to make we need to
-	 * calculate it in advance and hard code it into the platform
-	 * conf.mk. Here where we have all the needed values we double
-	 * check that the compiler is supplied the correct value.
+	 * CFG_ASAN_SHADOW_OFFSET也作为
+	 * -fasan-shadow-offset=$(CFG_ASAN_SHADOW_OFFSET)提供给编译器。
+	 * 由于计算CFG_ASAN_SHADOW_OFFSET所需的所有值在make中不可用，
+	 * 我们需要预先计算并硬编码到平台conf.mk中。
+	 * 在这里我们拥有所有需要的值，双重检查编译器是否提供了正确的值。
 	 */
 
 #define __ASAN_SHADOW_START \
 	ROUNDUP(TEE_RAM_START + (TEE_RAM_VA_SIZE * 8) / 9 - 8, 8)
 	assert(__ASAN_SHADOW_START == (vaddr_t)&__asan_shadow_start);
-#define __CFG_ASAN_SHADOW_OFFSET \
-	(__ASAN_SHADOW_START - (TEE_RAM_START / 8))
+#define __CFG_ASAN_SHADOW_OFFSET (__ASAN_SHADOW_START - (TEE_RAM_START / 8))
 	COMPILE_TIME_ASSERT(CFG_ASAN_SHADOW_OFFSET == __CFG_ASAN_SHADOW_OFFSET);
 #undef __ASAN_SHADOW_START
 #undef __CFG_ASAN_SHADOW_OFFSET
 
 	/*
-	 * Assign area covered by the shadow area, everything from start up
-	 * to the beginning of the shadow area.
+	 * 分配阴影区域覆盖的区域，从启动到阴影区域开始的所有内容。
 	 */
 	asan_set_shadowed((void *)TEE_LOAD_ADDR, &__asan_shadow_start);
 
 	/*
-	 * Add access to areas that aren't opened automatically by a
-	 * constructor.
+	 * 添加构造函数未自动打开的区域访问权限。
 	 */
 	boot_mem_init_asan();
 	asan_tag_access(&__ctor_list, &__ctor_end);
@@ -341,7 +332,7 @@ static void init_asan(void)
 
 	init_run_constructors();
 
-	/* Everything is tagged correctly, let's start address sanitizing. */
+	/* 一切都被正确标记，让我们开始地址消毒。 */
 	asan_start();
 }
 #else /*CFG_CORE_SANITIZE_KADDRESS*/
@@ -351,7 +342,7 @@ static void init_asan(void)
 #endif /*CFG_CORE_SANITIZE_KADDRESS*/
 
 #if defined(CFG_MEMTAG)
-/* Called from entry_a64.S only when MEMTAG is configured */
+/* 仅当配置了MEMTAG时从entry_a64.S调用 */
 void boot_init_memtag(void)
 {
 	memtag_init_ops(feat_mte_implemented());
@@ -363,8 +354,8 @@ static TEE_Result mmap_clear_memtag(struct tee_mmap_region *map,
 	switch (map->type) {
 	case MEM_AREA_NEX_RAM_RO:
 	case MEM_AREA_SEC_RAM_OVERALL:
-		DMSG("Clearing tags for VA %#"PRIxVA"..%#"PRIxVA,
-		     map->va, map->va + map->size - 1);
+		DMSG("清除VA %#" PRIxVA "..%#" PRIxVA "的标签", map->va,
+		     map->va + map->size - 1);
 		memtag_set_tags((void *)map->va, map->size, 0);
 		break;
 	default:
@@ -374,7 +365,7 @@ static TEE_Result mmap_clear_memtag(struct tee_mmap_region *map,
 	return TEE_SUCCESS;
 }
 
-/* Called from entry_a64.S only when MEMTAG is configured */
+/* 仅当配置了MEMTAG时从entry_a64.S调用 */
 void boot_clear_memtag(void)
 {
 	core_mmu_for_each_map(NULL, mmap_clear_memtag);
@@ -399,8 +390,7 @@ static void print_pager_pool_size(void)
 	struct tee_pager_stats __maybe_unused stats;
 
 	tee_pager_get_stats(&stats);
-	IMSG("Pager pool size: %zukB",
-		stats.npages_all * SMALL_PAGE_SIZE / 1024);
+	IMSG("页面池大小: %zukB", stats.npages_all * SMALL_PAGE_SIZE / 1024);
 }
 
 static void init_virt_pool(tee_mm_pool_t *virt_pool)
@@ -409,27 +399,24 @@ static void init_virt_pool(tee_mm_pool_t *virt_pool)
 	size_t size = TEE_RAM_VA_SIZE;
 
 #ifdef CFG_CORE_SANITIZE_KADDRESS
-	/* Carve out asan memory, flat maped after core memory */
+	/* 切割出asan内存，平坦映射在核心内存之后 */
 	if (begin + size > ASAN_SHADOW_PA)
 		size = ASAN_MAP_PA - begin;
 #endif
 
 	if (!tee_mm_init(virt_pool, begin, size, SMALL_PAGE_SHIFT,
 			 TEE_MM_POOL_NO_FLAGS))
-		panic("core_virt_mem_pool init failed");
+		panic("core_virt_mem_pool初始化失败");
 }
 
 /*
- * With CFG_CORE_ASLR=y the init part is relocated very early during boot.
- * The init part is also paged just as the rest of the normal paged code, with
- * the difference that it's preloaded during boot. When the backing store
- * is configured the entire paged binary is copied in place and then also
- * the init part. Since the init part has been relocated (references to
- * addresses updated to compensate for the new load address) this has to be
- * undone for the hashes of those pages to match with the original binary.
+ * 当CFG_CORE_ASLR=y时，init部分在启动期间很早就被重定位。
+ * init部分也像其他正常分页代码一样被分页，不同的是它在启动期间被预加载。
+ * 当配置后备存储时，整个分页二进制文件被复制到位，然后也是init部分。
+ * 由于init部分已被重定位(地址引用已更新以补偿新加载地址)，
+ * 这必须被撤销才能使这些页面的哈希与原始二进制文件匹配。
  *
- * If CFG_CORE_ASLR=n, nothing needs to be done as the code/ro pages are
- * unchanged.
+ * 如果CFG_CORE_ASLR=n，则不需要执行任何操作，因为代码/只读页面未更改。
  */
 static void undo_init_relocation(uint8_t *paged_store __maybe_unused)
 {
@@ -465,8 +452,8 @@ static struct fobj *ro_paged_alloc(tee_mm_entry_t *mm, void *hashes,
 	const struct boot_embdata *embdata = (const void *)__init_end;
 	const void *reloc = __init_end + embdata->reloc_offset;
 
-	return fobj_ro_reloc_paged_alloc(num_pages, hashes, reloc_offs,
-					 reloc, embdata->reloc_len, store);
+	return fobj_ro_reloc_paged_alloc(num_pages, hashes, reloc_offs, reloc,
+					 embdata->reloc_len, store);
 #else
 	return fobj_ro_paged_alloc(num_pages, hashes, store);
 #endif
@@ -479,10 +466,10 @@ static void init_pager_runtime(unsigned long pageable_part)
 	size_t pageable_start = (size_t)__pageable_start;
 	size_t pageable_end = (size_t)__pageable_end;
 	size_t pageable_size = pageable_end - pageable_start;
-	vaddr_t tzsram_end = TZSRAM_BASE + TZSRAM_SIZE - TEE_LOAD_ADDR +
-			     VCORE_START_VA;
-	size_t hash_size = (pageable_size / SMALL_PAGE_SIZE) *
-			   TEE_SHA256_HASH_SIZE;
+	vaddr_t tzsram_end =
+		TZSRAM_BASE + TZSRAM_SIZE - TEE_LOAD_ADDR + VCORE_START_VA;
+	size_t hash_size =
+		(pageable_size / SMALL_PAGE_SIZE) * TEE_SHA256_HASH_SIZE;
 	const struct boot_embdata *embdata = (const void *)__init_end;
 	const void *tmp_hashes = NULL;
 	tee_mm_entry_t *mm = NULL;
@@ -491,27 +478,25 @@ static void init_pager_runtime(unsigned long pageable_part)
 	uint8_t *hashes = NULL;
 
 	assert(pageable_size % SMALL_PAGE_SIZE == 0);
-	assert(embdata->total_len >= embdata->hashes_offset +
-				     embdata->hashes_len);
+	assert(embdata->total_len >=
+	       embdata->hashes_offset + embdata->hashes_len);
 	assert(hash_size == embdata->hashes_len);
 
 	tmp_hashes = __init_end + embdata->hashes_offset;
 
 	/*
-	 * This needs to be initialized early to support address lookup
-	 * in MEM_AREA_TEE_RAM
+	 * 需要尽早初始化以支持MEM_AREA_TEE_RAM中的地址查找
 	 */
 	tee_pager_early_init();
 
 	hashes = malloc(hash_size);
 	IMSG_RAW("\n");
-	IMSG("Pager is enabled. Hashes: %zu bytes", hash_size);
+	IMSG("页面功能已启用。哈希: %zu字节", hash_size);
 	assert(hashes);
 	asan_memcpy_unchecked(hashes, tmp_hashes, hash_size);
 
 	/*
-	 * The pager is about the be enabled below, eventual temporary boot
-	 * memory allocation must be removed now.
+	 * 页面功能即将在下面启用，必须现在移除临时启动内存分配。
 	 */
 	boot_mem_release_tmp_alloc();
 
@@ -522,10 +507,10 @@ static void init_pager_runtime(unsigned long pageable_part)
 	paged_store = phys_to_virt(tee_mm_get_smem(mm),
 				   MEM_AREA_SEC_RAM_OVERALL, pageable_size);
 	/*
-	 * Load pageable part in the dedicated allocated area:
-	 * - Move pageable non-init part into pageable area. Note bootloader
-	 *   may have loaded it anywhere in TA RAM hence use memmove().
-	 * - Copy pageable init part from current location into pageable area.
+	 * 将可分页部分加载到专用分配区域:
+	 * - 将可分页非init部分移动到可分页区域。注意引导加载程序
+	 *   可能已将其加载到TA RAM中的任何位置，因此使用memmove()。
+	 * - 将可分页init部分从当前位置复制到可分页区域。
 	 */
 	memmove(paged_store + init_size,
 		phys_to_virt(pageable_part,
@@ -534,63 +519,58 @@ static void init_pager_runtime(unsigned long pageable_part)
 		__pageable_part_end - __pageable_part_start);
 	asan_memcpy_unchecked(paged_store, __init_start, init_size);
 	/*
-	 * Undo eventual relocation for the init part so the hash checks
-	 * can pass.
+	 * 撤销init部分的重定位，以便哈希检查可以通过。
 	 */
 	undo_init_relocation(paged_store);
 
-	/* Check that hashes of what's in pageable area is OK */
-	DMSG("Checking hashes of pageable area");
+	/* 检查可分页区域中的哈希是否正确 */
+	DMSG("检查可分页区域的哈希");
 	for (n = 0; (n * SMALL_PAGE_SIZE) < pageable_size; n++) {
 		const uint8_t *hash = hashes + n * TEE_SHA256_HASH_SIZE;
 		const uint8_t *page = paged_store + n * SMALL_PAGE_SIZE;
 		TEE_Result res;
 
-		DMSG("hash pg_idx %zu hash %p page %p", n, hash, page);
+		DMSG("哈希 页面索引 %zu 哈希 %p 页面 %p", n, hash, page);
 		res = hash_sha256_check(hash, page, SMALL_PAGE_SIZE);
 		if (res != TEE_SUCCESS) {
-			EMSG("Hash failed for page %zu at %p: res 0x%x",
-			     n, (void *)page, res);
+			EMSG("页面 %zu 在 %p 处的哈希失败: 结果 0x%x", n,
+			     (void *)page, res);
 			panic();
 		}
 	}
 
 	/*
-	 * Assert prepaged init sections are page aligned so that nothing
-	 * trails uninited at the end of the premapped init area.
+	 * 断言预分页的init段是页面对齐的，这样在预映射的init区域末尾不会留下未初始化的内容。
 	 */
 	assert(!(init_size & SMALL_PAGE_MASK));
 
 	/*
-	 * Initialize the virtual memory pool used for main_mmu_l2_ttb which
-	 * is supplied to tee_pager_init() below.
+	 * 初始化用于main_mmu_l2_ttb的虚拟内存池，该池提供给下面的tee_pager_init()。
 	 */
 	init_virt_pool(&core_virt_mem_pool);
 
 	/*
-	 * Assign alias area for pager end of the small page block the rest
-	 * of the binary is loaded into. We're taking more than needed, but
-	 * we're guaranteed to not need more than the physical amount of
-	 * TZSRAM.
+	 * 为页面分配器分配别名区域，在小页面块的末端，
+	 * 其余二进制文件被加载到其中。我们获取的比需要的多，
+	 * 但我们保证不需要超过TZSRAM的物理量。
 	 */
 	mm = tee_mm_alloc2(&core_virt_mem_pool,
 			   (vaddr_t)core_virt_mem_pool.lo +
-			   core_virt_mem_pool.size - TZSRAM_SIZE,
+				   core_virt_mem_pool.size - TZSRAM_SIZE,
 			   TZSRAM_SIZE);
 	assert(mm);
 	tee_pager_set_alias_area(mm);
 
 	/*
-	 * Claim virtual memory which isn't paged.
-	 * Linear memory (flat map core memory) ends there.
+	 * 声明未分页的虚拟内存。
+	 * 线性内存(平坦映射核心内存)在此结束。
 	 */
 	mm = tee_mm_alloc2(&core_virt_mem_pool, VCORE_UNPG_RX_PA,
 			   (vaddr_t)(__pageable_start - VCORE_UNPG_RX_PA));
 	assert(mm);
 
 	/*
-	 * Allocate virtual memory for the pageable area and let the pager
-	 * take charge of all the pages already assigned to that memory.
+	 * 为可分页区域分配虚拟内存，并让页面管理器接管已分配给该内存的所有页面。
 	 */
 	mm = tee_mm_alloc2(&core_virt_mem_pool, (vaddr_t)__pageable_start,
 			   pageable_size);
@@ -606,18 +586,18 @@ static void init_pager_runtime(unsigned long pageable_part)
 			    (pageable_size - init_size) / SMALL_PAGE_SIZE,
 			    true);
 	if (pageable_end < tzsram_end)
-		tee_pager_add_pages(pageable_end, (tzsram_end - pageable_end) /
-						   SMALL_PAGE_SIZE, true);
+		tee_pager_add_pages(
+			pageable_end,
+			(tzsram_end - pageable_end) / SMALL_PAGE_SIZE, true);
 
 	/*
-	 * There may be physical pages in TZSRAM before the core load address.
-	 * These pages can be added to the physical pages pool of the pager.
-	 * This setup may happen when a the secure bootloader runs in TZRAM
-	 * and its memory can be reused by OP-TEE once boot stages complete.
+	 * TZSRAM中核心加载地址之前可能存在物理页面。
+	 * 这些页面可以添加到页面管理器的物理页面池中。
+	 * 当安全引导加载程序在TZRAM中运行并且其内存可以在启动阶段完成后被OP-TEE重用时，可能会发生这种设置。
 	 */
 	tee_pager_add_pages(core_virt_mem_pool.lo,
 			    (VCORE_UNPG_RX_PA - core_virt_mem_pool.lo) /
-				SMALL_PAGE_SIZE,
+				    SMALL_PAGE_SIZE,
 			    true);
 
 	print_pager_pool_size();
@@ -635,7 +615,7 @@ static int add_optee_dt_node(struct dt_descriptor *dt)
 	int ret;
 
 	if (fdt_path_offset(dt->blob, "/firmware/optee") >= 0) {
-		DMSG("OP-TEE Device Tree node already exists!");
+		DMSG("OP-TEE设备树节点已存在!");
 		return 0;
 	}
 
@@ -660,32 +640,28 @@ static int add_optee_dt_node(struct dt_descriptor *dt)
 
 	if (CFG_CORE_ASYNC_NOTIF_GIC_INTID) {
 		/*
-		 * The format of the interrupt property is defined by the
-		 * binding of the interrupt domain root. In this case it's
-		 * one Arm GIC v1, v2 or v3 so we must be compatible with
-		 * these.
+		 * 中断属性的格式由中断域根的绑定定义。
+		 * 在这种情况下是Arm GIC v1、v2或v3，所以我们必须与这些兼容。
 		 *
-		 * An SPI type of interrupt is indicated with a 0 in the
-		 * first cell. A PPI type is indicated with value 1.
+		 * SPI类型的中断在第一个单元格中用0表示。
+		 * PPI类型用值1表示。
 		 *
-		 * The interrupt number goes in the second cell where
-		 * SPIs ranges from 0 to 987 and PPI ranges from 0 to 15.
+		 * 中断号在第二个单元格中，SPI范围从0到987，PPI范围从0到15。
 		 *
-		 * Flags are passed in the third cells.
+		 * 标志在第三个单元格中传递。
 		 */
 		uint32_t itr_trigger = 0;
 		uint32_t itr_type = 0;
 		uint32_t itr_id = 0;
-		uint32_t val[3] = { };
+		uint32_t val[3] = {};
 
-		/* PPI are visible only in current CPU cluster */
-		static_assert(IS_ENABLED(CFG_CORE_FFA) ||
-			      !CFG_CORE_ASYNC_NOTIF_GIC_INTID ||
-			      (CFG_CORE_ASYNC_NOTIF_GIC_INTID >=
-			       GIC_SPI_BASE) ||
-			      ((CFG_TEE_CORE_NB_CORE <= 8) &&
-			       (CFG_CORE_ASYNC_NOTIF_GIC_INTID >=
-				GIC_PPI_BASE)));
+		/* PPI仅在当前CPU集群中可见 */
+		static_assert(
+			IS_ENABLED(CFG_CORE_FFA) ||
+			!CFG_CORE_ASYNC_NOTIF_GIC_INTID ||
+			(CFG_CORE_ASYNC_NOTIF_GIC_INTID >= GIC_SPI_BASE) ||
+			((CFG_TEE_CORE_NB_CORE <= 8) &&
+			 (CFG_CORE_ASYNC_NOTIF_GIC_INTID >= GIC_PPI_BASE)));
 
 		if (CFG_CORE_ASYNC_NOTIF_GIC_INTID >= GIC_SPI_BASE) {
 			itr_type = GIC_SPI;
@@ -721,7 +697,7 @@ static int dt_add_psci_node(struct dt_descriptor *dt)
 	int offs;
 
 	if (fdt_path_offset(dt->blob, "/psci") >= 0) {
-		DMSG("PSCI Device Tree node already exists!");
+		DMSG("PSCI设备树节点已存在!");
 		return 0;
 	}
 
@@ -839,31 +815,44 @@ static void update_external_dt(void)
 }
 #endif /*!CFG_DT*/
 
+/**
+ * init_tee_runtime - 初始化 TEE 运行时环境
+ *
+ * 该函数用于初始化 TEE（Trusted Execution Environment）运行时所需的各种组件。
+ * 包括调用预初始化函数、早期初始化函数、服务初始化函数，以及初始化线程相关的
+ * 指针认证密钥和栈保护金丝雀值。
+ *
+ * 注意：当启用虚拟化（CFG_NS_VIRTUALIZATION）时，部分初始化逻辑会被跳过或延后处理。
+ */
 void init_tee_runtime(void)
 {
 	/*
-	 * With virtualization we call this function when creating the
-	 * OP-TEE partition instead.
+	 * 在非虚拟化环境下，调用预初始化函数。
+	 * 虚拟化场景下，此步骤在创建 OP-TEE 分区时完成。
 	 */
 	if (!IS_ENABLED(CFG_NS_VIRTUALIZATION))
 		call_preinitcalls();
+
+	/* 调用早期初始化函数 */
 	call_early_initcalls();
+
+	/* 调用服务初始化函数 */
 	call_service_initcalls();
 
 	/*
-	 * These two functions uses crypto_rng_read() to initialize the
-	 * pauth keys. Once call_initcalls() returns we're guaranteed that
-	 * crypto_rng_read() is ready to be used.
+	 * 初始化核心本地指针认证密钥和线程指针认证密钥。
+	 * 这两个函数依赖 crypto_rng_read() 来生成随机数，确保在 call_initcalls()
+	 * 返回后 crypto_rng_read() 已经可以安全使用。
 	 */
 	thread_init_core_local_pauth_keys();
 	thread_init_thread_pauth_keys();
 
 	/*
-	 * Reinitialize canaries around the stacks with crypto_rng_read().
+	 * 使用 crypto_rng_read() 重新初始化栈保护金丝雀值。
 	 *
-	 * TODO: Updating canaries when CFG_NS_VIRTUALIZATION is enabled will
-	 * require synchronization between thread_check_canaries() and
-	 * thread_update_canaries().
+	 * 待办事项：在启用 CFG_NS_VIRTUALIZATION 的情况下，
+	 * 更新金丝雀值需要与 thread_check_canaries() 和 thread_update_canaries()
+	 * 进行同步处理。
 	 */
 	if (!IS_ENABLED(CFG_NS_VIRTUALIZATION))
 		thread_update_canaries();
@@ -911,15 +900,15 @@ static void init_primary(unsigned long pageable_part)
 	malloc_add_pool(__heap2_start, __heap2_end - __heap2_start);
 #endif
 #ifdef CFG_NS_VIRTUALIZATION
-	nex_malloc_add_pool(__nex_heap_start, __nex_heap_end -
-					      __nex_heap_start);
+	nex_malloc_add_pool(__nex_heap_start,
+			    __nex_heap_end - __nex_heap_start);
 #else
 	malloc_add_pool(__heap1_start, __heap1_end - __heap1_start);
 #endif
 	IMSG_RAW("\n");
 	if (IS_ENABLED(CFG_DYN_CONFIG)) {
-		size_t sz = sizeof(struct thread_core_local) *
-			    CFG_TEE_CORE_NB_CORE;
+		size_t sz =
+			sizeof(struct thread_core_local) * CFG_TEE_CORE_NB_CORE;
 		void *p = boot_mem_alloc(sz, alignof(void *) * 2);
 
 #ifdef CFG_NS_VIRTUALIZATION
@@ -1005,7 +994,7 @@ void __weak boot_init_primary_late(unsigned long fdt __unused,
 
 			if (!transfer_list_set_data_size(mapped_tl, tl_e,
 							 dtb_max_sz)) {
-				EMSG("Failed to extend DTB size to %#"PRIx32,
+				EMSG("Failed to extend DTB size to %#" PRIx32,
 				     dtb_max_sz);
 				panic();
 			}
@@ -1039,29 +1028,51 @@ void __weak boot_init_primary_late(unsigned long fdt __unused,
 	thread_init_thread_core_local(CFG_TEE_CORE_NB_CORE);
 }
 
+/**
+ * @brief 初始化主CPU运行时环境
+ *
+ * 该函数负责初始化主CPU的运行时环境，包括线程、中断控制器、浮点单元等。
+ * 根据配置选项，还会打印版本信息、安全警告、地址随机化信息等。
+ * 此外，还会根据平台特性检查是否需要应用NMFI（Non-Maskable Fault Interrupt）相关的 workaround。
+ *
+ * 注意：此函数是弱符号定义（__weak），允许在其他地方被重写。
+ */
 void __weak boot_init_primary_runtime(void)
 {
+	/* 初始化主线程 */
 	thread_init_primary();
+
+	/* 打印OP-TEE版本信息 */
 	IMSG("OP-TEE version: %s", core_v_str);
+
+	/* 如果启用了不安全配置，打印警告信息 */
 	if (IS_ENABLED(CFG_INSECURE)) {
 		IMSG("WARNING: This OP-TEE configuration might be insecure!");
 		IMSG("WARNING: Please check https://optee.readthedocs.io/en/latest/architecture/porting_guidelines.html");
 	}
+
+	/* 打印主CPU初始化信息 */
 	IMSG("Primary CPU initializing");
+
 #ifdef CFG_CORE_ASLR
-	DMSG("Executing at offset %#lx with virtual load address %#"PRIxVA,
+	/* 如果启用了地址空间布局随机化（ASLR），打印执行偏移和虚拟加载地址 */
+	DMSG("Executing at offset %#lx with virtual load address %#" PRIxVA,
 	     (unsigned long)boot_mmu_config.map_offset, VCORE_START_VA);
 #endif
+
 #ifdef CFG_NS_VIRTUALIZATION
+	/* 如果启用了非安全虚拟化，打印支持的客户机数量 */
 	DMSG("NS-virtualization enabled, supporting %u guests",
 	     CFG_VIRT_GUEST_COUNT);
 #endif
+
+	/* 如果启用了内存标记功能，打印其启用状态 */
 	if (IS_ENABLED(CFG_MEMTAG))
 		DMSG("Memory tagging %s",
-		     memtag_is_enabled() ?  "enabled" : "disabled");
+		     memtag_is_enabled() ? "enabled" : "disabled");
 
-	/* Check if platform needs NMFI workaround */
-	if (cpu_nmfi_enabled())	{
+	/* 检查平台是否需要NMFI workaround */
+	if (cpu_nmfi_enabled()) {
 		if (!IS_ENABLED(CFG_CORE_WORKAROUND_ARM_NMFI))
 			IMSG("WARNING: This ARM core has NMFI enabled, please apply workaround!");
 	} else {
@@ -1069,21 +1080,25 @@ void __weak boot_init_primary_runtime(void)
 			IMSG("WARNING: This ARM core does not have NMFI enabled, no need for workaround");
 	}
 
+	/* 初始化主CPU的中断控制器 */
 	boot_primary_init_intc();
+
+	/* 初始化非安全世界的浮点单元 */
 	init_vfp_nsec();
+
+	/* 如果未启用NS虚拟化，则取消本地中断屏蔽并初始化TEE运行时 */
 	if (!IS_ENABLED(CFG_NS_VIRTUALIZATION)) {
 		/*
-		 * Unmask native interrupts during driver initcalls.
+		 * 在驱动初始化调用期间取消本地中断屏蔽。
 		 *
-		 * NS-virtualization still uses the temporary stack also
-		 * used for exception handling so it must still have native
-		 * interrupts masked.
+		 * NS虚拟化仍使用临时堆栈（也用于异常处理），因此必须保持本地中断屏蔽。
 		 */
 		thread_set_exceptions(thread_get_exceptions() &
 				      ~THREAD_EXCP_NATIVE_INTR);
 		init_tee_runtime();
 	}
 
+	/* 如果未启用分页机制，则释放临时分配的内存 */
 	if (!IS_ENABLED(CFG_WITH_PAGER))
 		boot_mem_release_tmp_alloc();
 }
@@ -1122,28 +1137,44 @@ static void init_secondary_helper(void)
 	init_vfp_sec();
 	init_vfp_nsec();
 
-	IMSG("Secondary CPU %zu switching to normal world boot", get_core_pos());
+	IMSG("Secondary CPU %zu switching to normal world boot",
+	     get_core_pos());
 }
 
-/*
- * Note: this function is weak just to make it possible to exclude it from
- * the unpaged area so that it lies in the init area.
+/**
+ * @brief 初始化主核的早期启动过程
+ *
+ * 该函数负责在系统启动早期阶段初始化主核的相关资源。它会根据配置选项
+ * 处理传输列表（Transfer List）和可分页部分（Pageable Part），并调用
+ * init_primary 函数完成主核的初始化。
+ *
+ * @note 该函数使用 [__weak]属性，允许其他模块覆盖其实现。
  */
 void __weak boot_init_primary_early(void)
 {
 	unsigned long pageable_part = 0;
 	struct transfer_list_entry *tl_e = NULL;
 
+	/*
+	 * 如果启用了传输列表功能并且存在启动参数中的传输列表，
+	 * 则映射并保存传输列表，同时查找与 OPTEE 可分页部分相关的条目。
+	 */
 	if (IS_ENABLED(CFG_TRANSFER_LIST) && boot_arg_transfer_list) {
-		/* map and save the TL */
+		/* 映射传输列表 */
 		mapped_tl = transfer_list_map(boot_arg_transfer_list);
 		if (!mapped_tl)
 			panic("Failed to map transfer list");
 
+		/* 打印传输列表内容用于调试 */
 		transfer_list_dump(mapped_tl);
+
+		/* 查找标记为 TL_TAG_OPTEE_PAGABLE_PART 的条目 */
 		tl_e = transfer_list_find(mapped_tl, TL_TAG_OPTEE_PAGABLE_PART);
 	}
 
+	/*
+	 * 如果启用了分页功能，则根据传输列表或启动参数设置可分页部分的地址。
+	 */
 	if (IS_ENABLED(CFG_WITH_PAGER)) {
 		if (IS_ENABLED(CFG_TRANSFER_LIST) && tl_e)
 			pageable_part =
@@ -1152,6 +1183,7 @@ void __weak boot_init_primary_early(void)
 			pageable_part = boot_arg_pageable_part;
 	}
 
+	/* 调用主核初始化函数，传入可分页部分的地址 */
 	init_primary(pageable_part);
 }
 
@@ -1258,7 +1290,7 @@ unsigned long __weak get_aslr_seed(void)
 		goto err;
 	}
 
-	offs =  fdt_path_offset(fdt, "/secure-chosen");
+	offs = fdt_path_offset(fdt, "/secure-chosen");
 	if (offs < 0) {
 		DMSG("Cannot find /secure-chosen");
 		goto err;
@@ -1293,16 +1325,16 @@ static void *get_fdt_from_boot_info(struct ffa_boot_info_header_1_1 *hdr)
 	int ret = 0;
 
 	if (hdr->signature != FFA_BOOT_INFO_SIGNATURE) {
-		EMSG("Bad boot info signature %#"PRIx32, hdr->signature);
+		EMSG("Bad boot info signature %#" PRIx32, hdr->signature);
 		panic();
 	}
 	if (hdr->version != FFA_BOOT_INFO_VERSION_1_1 &&
 	    hdr->version != FFA_BOOT_INFO_VERSION_1_2) {
-		EMSG("Bad boot info version %#"PRIx32, hdr->version);
+		EMSG("Bad boot info version %#" PRIx32, hdr->version);
 		panic();
 	}
 	if (hdr->desc_count != 1) {
-		EMSG("Bad boot info descriptor count %#"PRIx32,
+		EMSG("Bad boot info descriptor count %#" PRIx32,
 		     hdr->desc_count);
 		panic();
 	}
@@ -1313,13 +1345,14 @@ static void *get_fdt_from_boot_info(struct ffa_boot_info_header_1_1 *hdr)
 	else if (name_fmt == FFA_BOOT_INFO_FLAG_NAME_FORMAT_UUID)
 		DMSG("Boot info descriptor UUID %pUl", (void *)desc->name);
 	else
-		DMSG("Boot info descriptor: unknown name format %"PRIu8,
+		DMSG("Boot info descriptor: unknown name format %" PRIu8,
 		     name_fmt);
 
 	content_fmt = (desc->flags & FFA_BOOT_INFO_FLAG_CONTENT_FORMAT_MASK) >>
 		      FFA_BOOT_INFO_FLAG_CONTENT_FORMAT_SHIFT;
 	if (content_fmt != FFA_BOOT_INFO_FLAG_CONTENT_FORMAT_ADDR) {
-		EMSG("Bad boot info content format %"PRIu8", expected %u (address)",
+		EMSG("Bad boot info content format %" PRIu8
+		     ", expected %u (address)",
 		     content_fmt, FFA_BOOT_INFO_FLAG_CONTENT_FORMAT_ADDR);
 		panic();
 	}
@@ -1361,9 +1394,8 @@ static void get_sec_mem_from_manifest(void *fdt, paddr_t *base,
 	*size = num;
 }
 
-void __weak boot_save_args(unsigned long a0, unsigned long a1,
-			   unsigned long a2, unsigned long a3,
-			   unsigned long a4 __maybe_unused)
+void __weak boot_save_args(unsigned long a0, unsigned long a1, unsigned long a2,
+			   unsigned long a3, unsigned long a4 __maybe_unused)
 {
 	/*
 	 * Register use:
@@ -1489,7 +1521,8 @@ static TEE_Result release_transfer_list(void)
 		ret = fdt_pack(dt->blob);
 		if (ret < 0) {
 			EMSG("Failed to pack Device Tree at 0x%" PRIxPA
-			     ": error %d", virt_to_phys(dt->blob), ret);
+			     ": error %d",
+			     virt_to_phys(dt->blob), ret);
 			panic();
 		}
 

@@ -107,7 +107,8 @@ static size_t get_ta_ram_size(void)
 	size_t ta_size = nex_phys_mem_get_ta_size();
 
 	return ROUNDDOWN(ta_size / CFG_VIRT_GUEST_COUNT - VCORE_UNPG_RW_SZ -
-			 core_mmu_get_total_pages_size(), SMALL_PAGE_SIZE);
+				 core_mmu_get_total_pages_size(),
+			 SMALL_PAGE_SIZE);
 }
 
 static TEE_Result prepare_memory_map(struct memory_map *mem_map,
@@ -147,7 +148,7 @@ static TEE_Result prepare_memory_map(struct memory_map *mem_map,
 			max_va = map->va + map->size;
 	}
 
-	DMSG("New map (%08lx):",  (vaddr_t)(VCORE_UNPG_RW_PA));
+	DMSG("New map (%08lx):", (vaddr_t)(VCORE_UNPG_RW_PA));
 
 	for (n = 0; n < mem_map->count; n++)
 		DMSG("T: %-16s rsz: %08x, pa: %08lx, va: %08lx, sz: %08lx attr: %x",
@@ -190,7 +191,6 @@ void virt_init_memory(struct memory_map *mem_map, paddr_t secmem0_base,
 	kmem_map = mem_map;
 }
 
-
 static TEE_Result configure_guest_prtn_mem(struct guest_partition *prtn)
 {
 	TEE_Result res = TEE_SUCCESS;
@@ -220,8 +220,8 @@ static TEE_Result configure_guest_prtn_mem(struct guest_partition *prtn)
 	}
 
 	prtn->tables_va = phys_to_virt(tee_mm_get_smem(prtn->tables),
-				      MEM_AREA_SEC_RAM_OVERALL,
-				      core_mmu_get_total_pages_size());
+				       MEM_AREA_SEC_RAM_OVERALL,
+				       core_mmu_get_total_pages_size());
 	assert(prtn->tables_va);
 
 	prtn->mmu_prtn = core_alloc_mmu_prtn(prtn->tables_va);
@@ -482,7 +482,7 @@ TEE_Result virt_guest_destroyed(uint16_t guest_id)
 	struct guest_partition *prtn = NULL;
 	uint32_t exceptions = 0;
 
-	IMSG("Removing guest %"PRId16, guest_id);
+	IMSG("Removing guest %" PRId16, guest_id);
 
 	exceptions = cpu_spin_lock_xsave(&prtn_list_lock);
 
@@ -542,16 +542,30 @@ void virt_unset_guest(void)
 	virt_put_guest(prtn);
 }
 
+/**
+ * @brief 处理标准调用时的虚拟化运行时初始化。
+ *
+ * 该函数用于在首次标准调用时初始化TEE（可信执行环境）运行时。
+ * 它确保运行时只被初始化一次，并通过互斥锁保护初始化过程的线程安全性。
+ * 如果运行时尚未初始化，则会调用 [init_tee_runtime](file://d:\Github_Sh\optee_os\core\include\kernel\boot.h#L70-L70) 和 [call_driver_initcalls](file://d:\Github_Sh\optee_os\core\include\initcall.h#L144-L144) 进行相关初始化操作。
+ */
 void virt_on_stdcall(void)
 {
 	struct guest_partition *prtn = get_current_prtn();
 
-	/* Initialize runtime on first std call */
+	/* 
+	 * 检查当前分区的运行时是否已初始化。
+	 * 如果未初始化，则获取互斥锁以确保线程安全，
+	 * 并再次检查以避免重复初始化。
+	 */
 	if (!prtn->runtime_initialized) {
 		mutex_lock(&prtn->mutex);
 		if (!prtn->runtime_initialized) {
+			/* 初始化TEE运行时环境 */
 			init_tee_runtime();
+			/* 调用驱动程序的初始化回调函数 */
 			call_driver_initcalls();
+			/* 标记运行时已初始化 */
 			prtn->runtime_initialized = true;
 		}
 		mutex_unlock(&prtn->mutex);

@@ -1,5 +1,6 @@
-/* SPDX-License-Identifier: BSD-2-Clause */
 /*
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Copyright (c) 2015-2025, Linaro Limited
  * Copyright (c) 2021-2023, Arm Limited
  */
@@ -20,16 +21,16 @@
 #include <sm/teesmc_opteed.h>
 #include <sm/teesmc_opteed_macros.h>
 
-	/*
-	 * Setup SP_EL0 and SPEL1, SP will be set to SP_EL0.
-	 * SP_EL0 is assigned:
-	 *   stack_tmp + (cpu_id + 1) * stack_tmp_stride - STACK_TMP_GUARD
-	 * SP_EL1 is assigned thread_core_local[cpu_id]
-	 */
+/*
+ * 设置SP_EL0和SP_EL1寄存器。SP将被设置为SP_EL0。
+ * SP_EL0分配方式：
+ *   stack_tmp + (cpu_id + 1) * stack_tmp_stride - STACK_TMP_GUARD
+ * SP_EL1分配方式：thread_core_local[cpu_id]
+ */
 	.macro set_sp
 		bl	__get_core_pos
 		cmp	x0, #CFG_TEE_CORE_NB_CORE
-		/* Unsupported CPU, park it before it breaks something */
+		/* 不支持的CPU，将其暂停以防止破坏系统 */
 		bge	unhandled_cpu
 		add	x0, x0, #1
 		adr_l	x1, stack_tmp_stride
@@ -49,16 +50,25 @@
 		msr	spsel, #0
 	.endm
 
+/*
+ * 读取MTE特性寄存器的值并提取相关字段。
+ */
 	.macro read_feat_mte reg
 		mrs	\reg, id_aa64pfr1_el1
 		ubfx	\reg, \reg, #ID_AA64PFR1_EL1_MTE_SHIFT, #4
 	.endm
 
+/*
+ * 读取PAN特性寄存器的值并提取相关字段。
+ */
 	.macro read_feat_pan reg
 		mrs	\reg, id_mmfr3_el1
 		ubfx	\reg, \reg, #ID_MMFR3_EL1_PAN_SHIFT, #4
 	.endm
 
+/*
+ * 设置SCTLR_EL1寄存器的值，启用必要的控制位。
+ */
 	.macro set_sctlr_el1
 		mrs	x0, sctlr_el1
 		orr	x0, x0, #SCTLR_I
@@ -90,6 +100,9 @@
 		msr	sctlr_el1, x0
 	.endm
 
+/*
+ * 初始化每个CPU的内存标签功能。
+ */
 	.macro init_memtag_per_cpu
 		read_feat_mte x0
 		cmp	w0, #1
@@ -97,19 +110,16 @@
 
 #ifdef CFG_TEE_CORE_DEBUG
 		/*
-		 * This together with GCR_EL1.RRND = 0 will make the tags
-		 * acquired with the irg instruction deterministic.
+		 * 这与GCR_EL1.RRND = 0一起使用，使得通过irg指令获取的标签是确定性的。
 		 */
 		mov_imm	x0, 0xcafe00
 		msr	rgsr_el1, x0
-		/* Avoid tag = 0x0 and 0xf */
+		/* 避免标签为0x0和0xf */
 		mov	x0, #0
 #else
 		/*
-		 * Still avoid tag = 0x0 and 0xf as we use that tag for
-		 * everything which isn't explicitly tagged. Setting
-		 * GCR_EL1.RRND = 1 to allow an implementation specific
-		 * method of generating the tags.
+		 * 仍然避免标签为0x0和0xf，因为我们将这些标签用于未明确标记的内容。
+		 * 设置GCR_EL1.RRND = 1以允许实现特定的方法生成标签。
 		 */
 		mov	x0, #GCR_EL1_RRND
 #endif
@@ -118,12 +128,11 @@
 		msr	gcr_el1, x0
 
 		/*
-		 * Enable the tag checks on the current CPU.
+		 * 在当前CPU上启用标签检查。
 		 *
-		 * Depends on boot_init_memtag() having cleared tags for
-		 * TEE core memory. Well, not really, addresses with the
-		 * tag value 0b0000 will use unchecked access due to
-		 * TCR_TCMA0.
+		 * 依赖于boot_init_memtag()已经清除了TEE核心内存的标签。
+		 * 实际上并非如此，带有标签值0b0000的地址将使用未经检查的访问，
+		 * 因为TCR_TCMA0。
 		 */
 		mrs	x0, tcr_el1
 		orr	x0, x0, #TCR_TBI0
@@ -139,6 +148,9 @@
 11:
 	.endm
 
+/*
+ * 初始化次要CPU的指针认证功能。
+ */
 	.macro init_pauth_secondary_cpu
 		msr	spsel, #1
 		ldp	x0, x1, [sp, #THREAD_CORE_LOCAL_KEYS]
@@ -151,6 +163,9 @@
 		isb
 	.endm
 
+/*
+ * 初始化PAN（特权访问从不）功能。
+ */
 	.macro init_pan
 		read_feat_pan x0
 		cmp	x0, #0
@@ -162,10 +177,14 @@
 	1:
 	.endm
 
+/*
+ * 系统启动入口点。
+ * 参数：
+ *   x0-x3: 启动参数
+ */
 FUNC _start , :
 	/*
-	 * Temporary copy of boot argument registers, will be passed to
-	 * boot_save_args() further down.
+	 * 暂时保存启动参数寄存器，稍后传递给boot_save_args()。
 	 */
 	mov	x19, x0
 	mov	x20, x1
@@ -185,22 +204,22 @@ FUNC _start , :
 
 #ifdef CFG_WITH_PAGER
 	/*
-	 * Move init code into correct location and move hashes to a
-	 * temporary safe location until the heap is initialized.
+	 * 将初始化代码移动到正确的位置，并将哈希值移动到临时安全位置，
+	 * 直到堆初始化完成。
 	 *
-	 * The binary is built as:
-	 * [Pager code, rodata and data] : In correct location
-	 * [Init code and rodata] : Should be copied to __init_start
-	 * [struct boot_embdata + data] : Should be saved before
-	 * initializing pager, first uint32_t tells the length of the data
+	 * 二进制文件构建如下：
+	 * [分页器代码、只读数据和数据]：在正确位置
+	 * [初始化代码和只读数据]：应复制到__init_start
+	 * [struct boot_embdata + 数据]：应在初始化分页器之前保存，
+	 * 第一个uint32_t表示数据长度
 	 */
-	adr	x0, __init_start	/* dst */
-	adr	x1, __data_end		/* src */
+	adr	x0, __init_start	/* 目标地址 */
+	adr	x1, __data_end		/* 源地址 */
 	adr	x2, __init_end
-	sub	x2, x2, x0		/* init len */
-	ldr	w4, [x1, x2]		/* length of hashes etc */
-	add	x2, x2, x4		/* length of init and hashes etc */
-	/* Copy backwards (as memmove) in case we're overlapping */
+	sub	x2, x2, x0		/* 初始化长度 */
+	ldr	w4, [x1, x2]		/* 哈希等数据的长度 */
+	add	x2, x2, x4		/* 初始化和哈希等数据的总长度 */
+	/* 向后复制（如memmove），以防重叠 */
 	add	x0, x0, x2		/* __init_start + len */
 	add	x1, x1, x2		/* __data_end + len */
 	adr_l	x3, boot_cached_mem_end
@@ -213,23 +232,22 @@ copy_init:
 	b.gt	copy_init
 #else
 	/*
-	 * The binary is built as:
-	 * [Core, rodata and data] : In correct location
-	 * [struct boot_embdata + data] : Should be moved to right before
-	 * __vcore_free_end, the first uint32_t tells the length of the
-	 * struct + data
+	 * 二进制文件构建如下：
+	 * [核心、只读数据和数据]：在正确位置
+	 * [struct boot_embdata + 数据]：应移动到__vcore_free_end之前，
+	 * 第一个uint32_t表示结构体+数据的长度
 	 */
-	adr_l	x1, __data_end		/* src */
+	adr_l	x1, __data_end		/* 源地址 */
 	ldr	w2, [x1]		/* struct boot_embdata::total_len */
-	/* dst */
+	/* 目标地址 */
 	adr_l	x0, __vcore_free_end
 	sub	x0, x0, x2
-	/* round down to beginning of page */
+	/* 向下舍入到页面开始 */
 	bic	x0, x0, #(SMALL_PAGE_SIZE - 1)
 	adr_l	x3, boot_embdata_ptr
 	str	x0, [x3]
 
-	/* Copy backwards (as memmove) in case we're overlapping */
+	/* 向后复制（如memmove），以防重叠 */
 	add	x1, x1, x2
 	add	x2, x0, x2
 	adr_l	x3, boot_cached_mem_end
@@ -243,8 +261,7 @@ copy_init:
 #endif
 
 	/*
-	 * Clear .bss, this code obviously depends on the linker keeping
-	 * start/end of .bss at least 8 byte aligned.
+	 * 清除.bss段，此代码显然依赖于链接器保持.bss段起始/结束至少8字节对齐。
 	 */
 	adr_l	x0, __bss_start
 	adr_l	x1, __bss_end
@@ -255,8 +272,7 @@ clear_bss:
 
 #ifdef CFG_NS_VIRTUALIZATION
 	/*
-	 * Clear .nex_bss, this code obviously depends on the linker keeping
-	 * start/end of .bss at least 8 byte aligned.
+	 * 清除.nex_bss段，此代码显然依赖于链接器保持.bss段起始/结束至少8字节对齐。
 	 */
 	adr_l	x0, __nex_bss_start
 	adr_l	x1, __nex_bss_end
@@ -268,15 +284,14 @@ clear_nex_bss:
 
 #if defined(CFG_CORE_PHYS_RELOCATABLE)
 	/*
-	 * Save the base physical address, it will not change after this
-	 * point.
+	 * 保存基础物理地址，此后不会更改。
 	 */
 	adr_l	x2, core_mmu_tee_load_pa
-	adr	x1, _start		/* Load address */
+	adr	x1, _start		/* 加载地址 */
 	str	x1, [x2]
 
-	mov_imm	x0, TEE_LOAD_ADDR	/* Compiled load address */
-	sub	x0, x1, x0		/* Relocatation offset */
+	mov_imm	x0, TEE_LOAD_ADDR	/* 编译时加载地址 */
+	sub	x0, x1, x0		/* 重定位偏移量 */
 
 	cbz	x0, 1f
 	bl	relocate
@@ -284,21 +299,21 @@ clear_nex_bss:
 #endif
 
 #ifdef CFG_CORE_SANITIZE_KADDRESS
-	/* Initialize the entire shadow area with no access */
-	adr_l	x0, __asan_shadow_start	/* start */
-	adr_l	x1, __asan_shadow_end	/* limit */
+	/* 使用无访问权限初始化整个阴影区域 */
+	adr_l	x0, __asan_shadow_start	/* 起始地址 */
+	adr_l	x1, __asan_shadow_end	/* 限制地址 */
 	mov	x2, #ASAN_DATA_RED_ZONE
 1:	str	x2, [x0], #8
 	cmp	x0, x1
 	bls	1b
 
 #if !defined(CFG_DYN_CONFIG)
-	/* Mark the entire stack area as OK */
+	/* 标记整个栈区域为OK */
 	mov_imm	x2, CFG_ASAN_SHADOW_OFFSET
-	adr_l	x0, __nozi_stack_start	/* start */
+	adr_l	x0, __nozi_stack_start	/* 起始地址 */
 	lsr	x0, x0, #ASAN_BLOCK_SHIFT
 	add	x0, x0, x2
-	adr_l	x1, __nozi_stack_end	/* limit */
+	adr_l	x1, __nozi_stack_end	/* 限制地址 */
 	lsr	x1, x1, #ASAN_BLOCK_SHIFT
 	add	x1, x1, x2
 	mov	w2, #0
@@ -308,19 +323,17 @@ clear_nex_bss:
 #endif
 #endif
 
-	/* Setup SP_EL0 and SP_EL1, SP will be set to SP_EL0 */
+	/* 设置SP_EL0和SP_EL1，SP将被设置为SP_EL0 */
 #if defined(CFG_DYN_CONFIG)
 	/*
-	 * Point SP_EL0 to a temporary stack with the at the end of mapped
-	 * core memory.
-	 * Point SP_EL1 a temporary struct thread_core_local before the
-	 * temporary stack.
+	 * 将SP_EL0指向映射核心内存末尾的临时栈。
+	 * 将SP_EL1指向临时struct thread_core_local，在临时栈之前。
 	 */
 	adr_l	x0, boot_embdata_ptr
 	ldr	x0, [x0]
 	sub	x1, x0, #THREAD_BOOT_INIT_TMP_ALLOC
 
-	/* Clear the allocated struct thread_core_local */
+	/* 清除分配的struct thread_core_local */
 	add	x2, x1, #THREAD_CORE_LOCAL_SIZE
 1:	stp	xzr, xzr, [x2, #-16]!
 	cmp	x2, x1
@@ -339,8 +352,7 @@ clear_nex_bss:
 	msr	spsel, #0
 	mov	sp, x0
 	/*
-	 * Record a single core, to be changed later before secure world
-	 * boot is done.
+	 * 记录单个核心，稍后在安全世界启动完成前更改。
 	 */
 	adr_l	x2, thread_core_local
 	str	x1, [x2]
@@ -350,7 +362,7 @@ clear_nex_bss:
 #else
 	set_sp
 
-	/* Initialize thread_core_local[current_cpu_id] for early boot */
+	/* 为早期启动初始化thread_core_local[current_cpu_id] */
 	bl	thread_get_abt_stack
 	mov	x1, sp
 	msr	spsel, #1
@@ -363,14 +375,12 @@ clear_nex_bss:
 	msr	spsel, #0
 #endif
 
-	/* Enable aborts now that we can receive exceptions */
+	/* 现在可以接收异常，启用中止 */
 	msr	daifclr, #DAIFBIT_ABT
 
 	/*
-	 * Invalidate dcache for all memory used during initialization to
-	 * avoid nasty surprices when the cache is turned on. We must not
-	 * invalidate memory not used by OP-TEE since we may invalidate
-	 * entries used by for instance ARM Trusted Firmware.
+	 * 使缓存在初始化期间使用的所有内存无效，以避免在缓存开启时出现意外情况。
+	 * 我们不得使OP-TEE未使用的内存无效，因为我们可能会使ARM可信固件等使用的条目无效。
 	 */
 	adr_l	x0, __text_start
 	adr_l	x1, boot_cached_mem_end
@@ -378,7 +388,7 @@ clear_nex_bss:
 	sub	x1, x1, x0
 	bl	dcache_cleaninv_range
 
-	/* Enable Console */
+	/* 启用控制台 */
 	bl	console_init
 
 	mov	x0, x19
@@ -389,11 +399,11 @@ clear_nex_bss:
 	bl	boot_save_args
 
 #ifdef CFG_WITH_PAGER
-	adr_l	x0, __init_end	/* pointer to boot_embdata */
+	adr_l	x0, __init_end	/* 指向boot_embdata */
 	ldr	w1, [x0]	/* struct boot_embdata::total_len */
 	add	x0, x0, x1
-	add	x0, x0, #0xfff	/* round up */
-	bic	x0, x0, #0xfff  /* to next page */
+	add	x0, x0, #0xfff	/* 向上舍入 */
+	bic	x0, x0, #0xfff  /* 到下一页 */
 	mov_imm x1, (TEE_RAM_PH_SIZE + TEE_RAM_START)
 	mov	x2, x1
 #else
@@ -409,9 +419,8 @@ clear_nex_bss:
 
 #ifdef CFG_MEMTAG
 	/*
-	 * If FEAT_MTE2 is available, initializes the memtag callbacks.
-	 * Tags for OP-TEE core memory are then cleared to make it safe to
-	 * enable MEMTAG below.
+	 * 如果FEAT_MTE2可用，则初始化memtag回调。
+	 * 然后清除OP-TEE核心内存的标签，使其安全地启用MEMTAG。
 	 */
 	bl	boot_init_memtag
 #endif
@@ -430,21 +439,19 @@ clear_nex_bss:
 
 #ifdef CFG_CORE_ASLR
 	/*
-	 * Process relocation information again updating for the virtual
-	 * map offset. We're doing this now before MMU is enabled as some
-	 * of the memory will become write protected.
+	 * 再次处理重定位信息，更新虚拟映射偏移量。
+	 * 我们现在这样做是因为MMU尚未启用，某些内存将成为写保护。
 	 */
 	ldr	x0, boot_mmu_config + CORE_MMU_CONFIG_MAP_OFFSET
 	cbz	x0, 1f
 	/*
-	 * Update boot_cached_mem_end address with load offset since it was
-	 * calculated before relocation.
+	 * 使用加载偏移量更新boot_cached_mem_end地址，因为它是在重定位之前计算的。
 	 */
 	adr_l	x5, boot_cached_mem_end
 	ldr	x6, [x5]
 	add	x6, x6, x0
 	str	x6, [x5]
-	adr	x1, _start		/* Load address */
+	adr	x1, _start		/* 加载地址 */
 	bl	relocate
 1:
 #endif
@@ -454,8 +461,8 @@ clear_nex_bss:
 #ifdef CFG_CORE_ASLR
 #if defined(CFG_DYN_CONFIG)
 	/*
-	 * thread_core_local holds only one core and thread_core_count is 1
-	 * so SP_EL1 points to the updated pointer for thread_core_local.
+	 * thread_core_local仅持有一个核心且thread_core_count为1，
+	 * 因此SP_EL1指向更新后的thread_core_local指针。
 	 */
 	msr	spsel, #1
 	mov	x1, sp
@@ -465,9 +472,8 @@ clear_nex_bss:
 #endif
 
 	/*
-	 * Update recorded end_va. This must be done before calling into C
-	 * code to make sure that the stack pointer matches what we have in
-	 * thread_core_local[].
+	 * 更新记录的end_va。这必须在调用C代码之前完成，
+	 * 以确保栈指针与我们在thread_core_local[]中的记录匹配。
 	 */
 	adr_l	x0, boot_mmu_config
 	ldr	x0, [x0, #CORE_MMU_CONFIG_MAP_OFFSET]
@@ -480,14 +486,13 @@ clear_nex_bss:
 	str	x1, [sp, #THREAD_CORE_LOCAL_ABT_STACK_VA_END]
 	msr	spsel, #0
 
-	/* Update relocations recorded with boot_mem_add_reloc() */
+	/* 更新通过boot_mem_add_reloc()记录的重定位 */
 	adr_l	x0, boot_mmu_config
 	ldr	x0, [x0, #CORE_MMU_CONFIG_MAP_OFFSET]
 	bl	boot_mem_relocate
 	/*
-	 * Reinitialize console, since register_serial_console() has
-	 * previously registered a PA and with ASLR the VA is different
-	 * from the PA.
+	 * 重新初始化控制台，因为register_serial_console()先前注册了PA，
+	 * 而使用ASLR时VA与PA不同。
 	 */
 	bl	console_init
 #endif
@@ -498,8 +503,8 @@ clear_nex_bss:
 
 #ifdef CFG_NS_VIRTUALIZATION
 	/*
-	 * Initialize partition tables for each partition to
-	 * default_partition which has been relocated now to a different VA
+	 * 为每个分区初始化分区表为default_partition，
+	 * 该分区现已重定位到不同的VA。
 	 */
 	bl	core_mmu_set_default_prtn_tbl
 #endif
@@ -515,8 +520,8 @@ clear_nex_bss:
 	bl	__get_core_pos
 
 	/*
-	 * Switch to the new thread_core_local and thread_core_count and
-	 * keep the pointer to the new thread_core_local in x1.
+	 * 切换到新的thread_core_local和thread_core_count，
+	 * 并将新thread_core_local的指针保留在x1中。
 	 */
 	adr_l	x1, __thread_core_count_new
 	ldr	x1, [x1]
@@ -528,10 +533,8 @@ clear_nex_bss:
 	str	x1, [x2]
 
 	/*
-	 * Update SP_EL0 to use the new tmp stack and update SP_EL1 to
-	 * point the new thread_core_local and clear
-	 * thread_core_local[0].stackcheck_recursion now that the stack
-	 * pointer matches recorded information.
+	 * 更新SP_EL0以使用新的tmp栈，并更新SP_EL1以指向新的thread_core_local，
+	 * 并清除thread_core_local[0].stackcheck_recursion，因为栈指针与记录的信息匹配。
 	 */
 	mov	x2, #THREAD_CORE_LOCAL_SIZE
 	/* x3 = x2 * x0 + x1 */
@@ -580,7 +583,7 @@ clear_nex_bss:
 #endif
 
 #ifdef _CFG_CORE_STACK_PROTECTOR
-	/* Update stack canary value */
+	/* 更新栈保护值 */
 	sub	sp, sp, #0x10
 	mov	x0, sp
 	mov	x1, #1
@@ -593,9 +596,8 @@ clear_nex_bss:
 #endif
 
 	/*
-	 * In case we've touched memory that secondary CPUs will use before
-	 * they have turned on their D-cache, clean and invalidate the
-	 * D-cache before exiting to normal world.
+	 * 如果我们在二级CPU启用其D-cache之前访问了它们将使用的内存，
+	 * 则在退出到正常世界之前清理并使D-cache无效。
 	 */
 	adr_l	x0, __text_start
 	adr_l	x1, boot_cached_mem_end
@@ -604,9 +606,8 @@ clear_nex_bss:
 	bl	dcache_cleaninv_range
 
 	/*
-	 * Clear current thread id now to allow the thread to be reused on
-	 * next entry. Matches the thread_init_boot_thread in
-	 * boot.c.
+	 * 现在清除当前线程ID，以便在线程下次进入时可以重用。
+	 * 匹配boot.c中的thread_init_boot_thread。
 	 */
 #ifndef CFG_NS_VIRTUALIZATION
 	bl 	thread_clr_boot_thread
@@ -615,8 +616,7 @@ clear_nex_bss:
 #ifdef CFG_CORE_FFA
 	adr	x0, cpu_on_handler
 	/*
-	 * Compensate for the virtual map offset since cpu_on_handler() is
-	 * called with MMU off.
+	 * 补偿虚拟映射偏移量，因为cpu_on_handler()在MMU关闭时被调用。
 	 */
 	ldr	x1, boot_mmu_config + CORE_MMU_CONFIG_MAP_OFFSET
 	sub	x0, x0, x1
@@ -624,16 +624,15 @@ clear_nex_bss:
 	b	thread_ffa_msg_wait
 #else
 	/*
-	 * Pass the vector address returned from main_init Compensate for
-	 * the virtual map offset since cpu_on_handler() is called with MMU
-	 * off.
+	 * 传递从main_init返回的向量地址。补偿虚拟映射偏移量，
+	 * 因为cpu_on_handler()在MMU关闭时被调用。
 	 */
 	ldr	x0, boot_mmu_config + CORE_MMU_CONFIG_MAP_OFFSET
 	adr	x1, thread_vector_table
 	sub	x1, x1, x0
 	mov	x0, #TEESMC_OPTEED_RETURN_ENTRY_DONE
 	smc	#0
-	/* SMC should not return */
+	/* SMC不应返回 */
 	panic_at_smc_return
 #endif
 END_FUNC _start
@@ -650,8 +649,8 @@ END_DATA boot_embdata_ptr
 #if defined(CFG_CORE_ASLR) || defined(CFG_CORE_PHYS_RELOCATABLE)
 LOCAL_FUNC relocate , :
 	/*
-	 * x0 holds relocate offset
-	 * x1 holds load address
+	 * x0保存重定位偏移量
+	 * x1保存加载地址
 	 */
 #ifdef CFG_WITH_PAGER
 	adr_l	x6, __init_end
@@ -661,32 +660,30 @@ LOCAL_FUNC relocate , :
 #endif
 	ldp	w2, w3, [x6, #BOOT_EMBDATA_RELOC_OFFSET]
 
-	add	x2, x2, x6	/* start of relocations */
-	add	x3, x3, x2	/* end of relocations */
+	add	x2, x2, x6	/* 重定位开始 */
+	add	x3, x3, x2	/* 重定位结束 */
 
 	/*
-	 * Relocations are not formatted as Rela64, instead they are in a
-	 * compressed format created by get_reloc_bin() in
-	 * scripts/gen_tee_bin.py
+	 * 重定位不是格式化的Rela64，而是由scripts/gen_tee_bin.py中的get_reloc_bin()
+	 * 创建的压缩格式。
 	 *
-	 * All the R_AARCH64_RELATIVE relocations are translated into a
-	 * list of 32-bit offsets from TEE_LOAD_ADDR. At each address a
-	 * 64-bit value pointed out which increased with the load offset.
+	 * 所有R_AARCH64_RELATIVE重定位都被转换为从TEE_LOAD_ADDR开始的32位偏移列表。
+	 * 在每个地址处，指向的64位值增加了加载偏移量。
 	 */
 
 #ifdef CFG_WITH_PAGER
 	/*
-	 * With pager enabled we can only relocate the pager and init
-	 * parts, the rest has to be done when a page is populated.
+	 * 启用分页器时，我们只能重定位分页器和初始化部分，
+	 * 其余部分必须在页面填充时完成。
 	 */
 	sub	x6, x6, x1
 #endif
 
 	b	2f
-	/* Loop over the relocation addresses and process all entries */
+	/* 循环遍历重定位地址并处理所有条目 */
 1:	ldr	w4, [x2], #4
 #ifdef CFG_WITH_PAGER
-	/* Skip too large addresses */
+	/* 跳过太大的地址 */
 	cmp	x4, x6
 	b.ge	2f
 #endif
@@ -705,10 +702,9 @@ END_FUNC relocate
 /*
  * void enable_mmu(unsigned long core_pos);
  *
- * This function depends on being mapped with in the identity map where
- * physical address and virtual address is the same. After MMU has been
- * enabled the instruction pointer will be updated to execute as the new
- * offset instead. Stack pointers and the return address are updated.
+ * 此函数依赖于在身份映射中映射，其中物理地址和虚拟地址相同。
+ * 启用MMU后，指令指针将更新为以新偏移量执行。
+ * 栈指针和返回地址也会更新。
  */
 LOCAL_FUNC enable_mmu , : , .identity_map
 	adr	x1, boot_mmu_config
@@ -732,40 +728,39 @@ LOCAL_FUNC enable_mmu , : , .identity_map
 	msr	ttbr1_el1, xzr
 	isb
 
-	/* Invalidate TLB */
+	/* 使TLB无效 */
 	tlbi	vmalle1
 
 	/*
-	 * Make sure translation table writes have drained into memory and
-	 * the TLB invalidation is complete.
+	 * 确保翻译表写入已刷新到内存，并且TLB无效已完成。
 	 */
 	dsb	sy
 	isb
 
-	/* Enable the MMU */
+	/* 启用MMU */
 	mrs	x1, sctlr_el1
 	orr	x1, x1, #SCTLR_M
 	msr	sctlr_el1, x1
 	isb
 
-	/* Update vbar */
+	/* 更新vbar */
 	mrs	x1, vbar_el1
 	add	x1, x1, x6
 	msr	vbar_el1, x1
 	isb
 
-	/* Invalidate instruction cache and branch predictor */
+	/* 使指令缓存和分支预测器无效 */
 	ic	iallu
 	isb
 
-	/* Enable I and D cache */
+	/* 启用I和D缓存 */
 	mrs	x1, sctlr_el1
 	orr	x1, x1, #SCTLR_I
 	orr	x1, x1, #SCTLR_C
 	msr	sctlr_el1, x1
 	isb
 
-	/* Adjust stack pointers and return address */
+	/* 调整栈指针和返回地址 */
 	msr	spsel, #1
 	add	sp, sp, x6
 	msr	spsel, #0
@@ -797,7 +792,7 @@ FUNC cpu_on_handler , :
 	init_pan
 #endif
 
-	/* Enable aborts now that we can receive exceptions */
+	/* 现在可以接收异常，启用中止 */
 	msr	daifclr, #DAIFBIT_ABT
 
 	bl	__get_core_pos
@@ -805,8 +800,7 @@ FUNC cpu_on_handler , :
 
 #if defined(CFG_DYN_CONFIG)
 	/*
-	 * Update SP_EL0 to use the new tmp stack and update SP_EL1 to
-	 * point the new thread_core_local.
+	 * 更新SP_EL0以使用新的tmp栈，并更新SP_EL1以指向新的thread_core_local。
 	 */
 	bl	__get_core_pos
 	adr_l	x1, thread_core_local
@@ -820,7 +814,7 @@ FUNC cpu_on_handler , :
 	mov	sp, x3
 	msr	spsel, #0
 #else
-	/* Setup SP_EL0 and SP_EL1, SP will be set to SP_EL0 */
+	/* 设置SP_EL0和SP_EL1，SP将被设置为SP_EL0 */
 	set_sp
 #endif
 
@@ -855,10 +849,9 @@ END_DATA stack_tmp_rel
 #endif
 
 	/*
-	 * This macro verifies that the a given vector doesn't exceed the
-	 * architectural limit of 32 instructions. This is meant to be placed
-	 * immedately after the last instruction in the vector. It takes the
-	 * vector entry as the parameter
+	 * 此宏验证给定向量不超过架构限制的32条指令。
+	 * 应立即放置在向量最后一条指令之后。
+	 * 它以向量条目作为参数。
 	 */
 	.macro check_vector_size since
 	  .if (. - \since) > (32 * 4)
@@ -870,7 +863,7 @@ END_DATA stack_tmp_rel
 	.align	11
 LOCAL_FUNC reset_vect_table , :, .identity_map, , nobti
 	/* -----------------------------------------------------
-	 * Current EL with SP0 : 0x0 - 0x180
+	 * 当前EL使用SP0 : 0x0 - 0x180
 	 * -----------------------------------------------------
 	 */
 SynchronousExceptionSP0:
@@ -893,7 +886,7 @@ SErrorSP0:
 	check_vector_size SErrorSP0
 
 	/* -----------------------------------------------------
-	 * Current EL with SPx: 0x200 - 0x380
+	 * 当前EL使用SPx: 0x200 - 0x380
 	 * -----------------------------------------------------
 	 */
 	.align	7
@@ -917,7 +910,7 @@ SErrorSPx:
 	check_vector_size SErrorSPx
 
 	/* -----------------------------------------------------
-	 * Lower EL using AArch64 : 0x400 - 0x580
+	 * 下层EL使用AArch64 : 0x400 - 0x580
 	 * -----------------------------------------------------
 	 */
 	.align	7
@@ -941,7 +934,7 @@ SErrorA64:
 	check_vector_size SErrorA64
 
 	/* -----------------------------------------------------
-	 * Lower EL using AArch32 : 0x0 - 0x180
+	 * 下层EL使用AArch32 : 0x0 - 0x180
 	 * -----------------------------------------------------
 	 */
 	.align	7
